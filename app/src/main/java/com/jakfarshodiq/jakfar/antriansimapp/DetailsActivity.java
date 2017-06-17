@@ -1,5 +1,8 @@
 package com.jakfarshodiq.jakfar.antriansimapp;
 
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.ProgressDialog;
 import android.content.Intent;
 import android.support.v7.app.AppCompatActivity;
@@ -38,12 +41,18 @@ public class DetailsActivity extends AppCompatActivity {
     private TextView antrianAsli;
     private Button btnRefresh;
 
-    public static final String ROOT_URL = "https://api.myjson.com/bins/";
+    public static final String ROOT_URL = "http://robotijo.esy.es/";
+
+    String id_antrian;
+    String btnRefreshStatus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_details);
+        Bundle extras = getIntent().getExtras();
+
+        id_antrian = extras.getString("id_antrian");
 
         nama = (TextView) findViewById(R.id.nama);
         ktp = (TextView) findViewById(R.id.ktp);
@@ -59,6 +68,7 @@ public class DetailsActivity extends AppCompatActivity {
         btnRefresh.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                btnRefreshStatus = "YES";
                 postMessage();
             }
         });
@@ -75,7 +85,7 @@ public class DetailsActivity extends AppCompatActivity {
         }, 1000 * 60 * 2);
     }
 
-    private void initializeRetrofit(){
+    private void initializeRetrofit() {
 
         HttpLoggingInterceptor interceptor = new HttpLoggingInterceptor();
         interceptor.setLevel(HttpLoggingInterceptor.Level.BODY);
@@ -91,44 +101,64 @@ public class DetailsActivity extends AppCompatActivity {
 
     private void postMessage() {
         HashMap<String, String> params = new HashMap<>();
-        params.put("username", "elisabeth");
-        params.put("message", "Hey, what are you doing?");
-        params.put("sex", "female");
-        params.put("age", "21");
+        params.put("id_antrian", id_antrian);
 
-        final ProgressDialog loading = ProgressDialog.show(this, "Mengambil data dari server","Mohon tunggu ..", false, false);
+        final ProgressDialog loading = ProgressDialog.show(this, "Mengambil data dari server", "Mohon tunggu ..", false, false);
 
         PostKodeAntrian apiService = retrofit.create(PostKodeAntrian.class);
-        Call<ResponseBody> result = apiService.postMessage();
+        Call<ResponseBody> result = apiService.postMessage(params);
         result.enqueue(new Callback<ResponseBody>() {
             @Override
             public void onResponse(Call<ResponseBody> call, Response<ResponseBody> response) {
                 try {
                     loading.dismiss();
-                    if(response.body()!=null) {
+                    if (response.body() != null) {
 //                        String body = response.body();
                         Gson gson = new Gson();
                         RequestKodeAntrian models = gson.fromJson(response.body().string(), RequestKodeAntrian.class);
 
+                        String status = models.getStatus();
                         String jenisSimStr = models.getJenisSim();
+                        String antrianBerjalanStr = models.getNoAntrianBerjalan();
+                        String antrianNoStr = models.getNoAntrian();
 
-                        nama.setText(" : " + models.getNamaPenduduk());
-                        ktp.setText(" : " + models.getIdPenduduk());
-                        jenisSim.setText(models.getJenisSim());
-
-                        if (jenisSimStr.matches("(.*)SIM C")) {
-                            simImage.setImageResource(R.drawable.motorbiking);
+                        String status_antrian = models.getStatusAntrian();
+                        if (status_antrian.equals("finish")) {
+                            Toast.makeText(DetailsActivity.this, "Kode Antrian "+ id_antrian +" sudah selesai.", Toast.LENGTH_LONG).show();
                         } else {
-                            simImage.setImageResource(R.drawable.car);
+                            if (status.equals("Sukses")) {
+                                nama.setText(" : " + models.getNamaPenduduk());
+                                ktp.setText(" : " + models.getIdPenduduk());
+                                jenisSim.setText(models.getJenisSim());
+
+                                if (jenisSimStr.matches("(.*)SIM C")) {
+                                    simImage.setImageResource(R.drawable.motorbiking);
+                                } else if (jenisSimStr.matches("(.*)SIM A")) {
+                                    simImage.setImageResource(R.drawable.car);
+                                } else if (jenisSimStr.matches("(.*)SIM B")) {
+                                    simImage.setImageResource(R.drawable.bus);
+                                }
+
+                                antrianBerjalan.setText(antrianBerjalanStr);
+                                antrianAsli.setText(models.getNoAntrian());
+
+                                int sisaAntrian = Integer.parseInt(antrianBerjalanStr);
+                                int noAntrian = Integer.parseInt(antrianNoStr);
+                                int selisih = noAntrian - sisaAntrian;
+
+                                if (selisih < 5 && selisih > 0) {
+                                    if (!"YES".equals(btnRefreshStatus)) {
+                                        notifyUser(selisih);
+                                    }
+                                } else if (selisih == noAntrian) {
+                                    Toast.makeText(DetailsActivity.this, "Kode Antrian "+ id_antrian +" sedang berlangsung", Toast.LENGTH_LONG).show();
+                                }
+                            }
                         }
-                        antrianBerjalan.setText(models.getNoAntrianBerjalan());
-                        antrianAsli.setText(models.getNoAntrian());
-
-
                     } else {
-
+                        finish();
                     }
-                }catch (Exception e){
+                } catch (Exception e) {
                     e.printStackTrace();
                 }
             }
@@ -140,4 +170,26 @@ public class DetailsActivity extends AppCompatActivity {
         });
     }
 
+    public void notifyUser(int sisaAntrian) {
+        // prepare intent which is triggered if the
+        // notification is selected
+
+        Intent intent = new Intent(this, DetailsActivity.class);
+        // use System.currentTimeMillis() to have a unique ID for the pending intent
+        PendingIntent pIntent = PendingIntent.getActivity(this, (int) System.currentTimeMillis(), intent, 0);
+
+        // build notification
+        // the addAction re-use the same intent to keep the example short
+        Notification n = new Notification.Builder(this)
+                .setContentTitle("Antrian Sim App Notification")
+                .setContentText("Antrian anda kurang " + sisaAntrian + " lagi lhoo..")
+                .setSmallIcon(R.drawable.cards)
+                .setContentIntent(pIntent)
+                .setAutoCancel(true).build();
+
+        NotificationManager notificationManager =
+                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+
+        notificationManager.notify(0, n);
+    }
 }
